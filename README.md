@@ -4,14 +4,13 @@ Open trade-space sandbox for in-space cryogenic propellant storage. See PROJECT.
 physics specification and conventions.
 
 ## Setup (laptop)
-    pip install numpy scipy matplotlib CoolProp pytest
-    pytest -q                        # all tests, including CoolProp-dependent bounds tests
+    pip install -r requirements.txt
+    python -m pytest                 # all tests; CoolProp is required, CI enforces it
     python scripts/make_figures.py   # regenerates report/figures, results.json, results_macros.tex
     cd report && latexmk -pdf CryoSand_FirstReport.tex
 
-`make_figures.py` falls back to PROJECT.md reference values only when CoolProp is missing,
-and says so in the report (\PropSource macro). With CoolProp installed, every number in the
-report is regenerated from CoolProp automatically.
+Every number in the report comes from `make_figures.py` through `results_macros.tex`, and every
+fluid property comes from CoolProp. The script refuses to run without CoolProp.
 
 ## Layout
     cryosand/core      constants, CoolProp wrapper, resistance network, dataclasses

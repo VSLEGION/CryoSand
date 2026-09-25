@@ -1,0 +1,6 @@
+# Runtime + test dependencies (PROJECT.md s.3). Python 3.11+.
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8
+CoolProp>=6.6
+pytest>=8.0
