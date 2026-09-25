@@ -148,13 +148,28 @@ P     = PropsSI('P', 'D', rho, 'U', u, fluid)
 ```
 Exact for a well-mixed tank. No correlation required.
 
-**Closed, surface bound** — all energy into an interface layer of mass `m_surf`:
+**Closed, surface bound** — all energy into a *warm zone*: an interface layer
+of liquid mass `m_surf` plus the ullage vapour. The remaining liquid is inert at
+its initial state and occupies a fixed volume.
 ```
-dT_int/dt = Q_net / (m_surf * cp)
-P         = P_sat(T_int)
+m_w   = m_surf + m_v                     V_w = V - (m_liquid - m_surf) / rho_l
+du_w/dt = Q_net / m_w
+P     = PropsSI('P', 'D', m_w / V_w, 'U', u_w, fluid)   # = P_sat(T_int) while two-phase
 ```
-`m_surf` is a swept parameter, and the sweep is a result, not a nuisance. As
-`m_surf -> m_total` this must collapse onto the homogeneous bound.
+`m_surf / m_liquid` is a swept parameter, and the sweep is a result, not a
+nuisance. As `m_surf -> m_liquid` the warm zone is the whole tank, so this
+collapses onto the homogeneous bound **exactly, by construction**.
+
+*History (Sept 2026):* the textbook form `dT_int/dt = Q_net / (m_surf * cp)`,
+`P = P_sat(T_int)` was implemented first. `test_bounds_ordered` caught it
+storing more energy than the homogeneous bound at 90 % fill (it ignores the
+vapour, and the condensation of a compressed ullage). It is kept in `l3_ullage`
+only as a regression record. A thin layer may evaporate completely before
+`P_max` (superheated warm zone); re-condensation onto the cold liquid is
+neglected there, which keeps the result a valid fast bound.
+
+Closed-tank energies raise `LiquidFullError` if the absorbing zone becomes
+liquid-full before `P_max` (e.g. 95 % fill at 3 bar for all three propellants).
 
 ### L4 — Pressure control and active cooling
 
@@ -288,7 +303,7 @@ default.
 | `test_robin_limits` | `h -> inf` gives Dirichlet at `T_inf`; `h -> 0` gives insulated |
 | `test_zbo_balance` | `Q_lift == Q_leak` ⇒ `mdot_boil == 0` to 1e-6 |
 | `test_bounds_ordered` | surface-bound `dP/dt` ≥ homogeneous `dP/dt`, at every condition |
-| `test_bounds_collapse` | `m_surf -> m_total` ⇒ surface bound → homogeneous bound |
+| `test_bounds_collapse` | `m_surf -> m_liquid` ⇒ surface bound = homogeneous bound (to 1e-10) |
 | `test_energy_balance` | transient energy closes to better than 0.5 % |
 | `test_boiloff_published` | matches a published demonstration-tank result within 10 % |
 
@@ -359,7 +374,20 @@ optimal omega, explicit transient under CFL, Dirichlet/Neumann/Robin boundary
 conditions, harmonic-mean variable-k stencils, Streamlit interface. Becomes
 Layer L2. PINN module in progress.
 
-**Next:** build-order steps 1–3.
+**Complete (Sept 2026, first written report):** build steps 1–7. 54 tests pass
+under CoolProp: analytic limits, bound ordering at every `m_surf` for three
+propellants and four fills, exact collapse, energy closure, liquid-full guard.
+Vented crossover map (step 9, vented closure) and closed-tank crossover at the
+LEO baseline. All report numbers regenerated from CoolProp.
+
+**Next:**
+- Closed-tank crossover sweeps across radius, environment and fill (step 9 under
+  all three closures).
+- One cooler-mass model: `model.run_steady` uses linear `specific_mass`, while
+  `trade.py` and the figures use the Strobridge correlation.
+- Load `data/parameters.yaml` in `make_figures.py` instead of duplicating values;
+  source every `provisional` entry.
+- Step 8 (2-D L2 port), `test_boiloff_published` (MHTB), step 10 (Streamlit).
 
 **Deferred to spring:** two-phase CFD dataset and trained surrogate; modified
 Lockheed MLI correlation; view factors and attitude dependence; thermodynamic

@@ -35,16 +35,20 @@ Advisor: \textit{[name]}}
 \noindent
 CryoSand is an open tool for the in-space cryogenic storage trade: when does it pay to refrigerate a
 propellant tank instead of only insulating it? This report covers the first month of the project. The
-physics stack (layers L0--L5) has been specified, and build steps 1--5 are implemented with 18 analytic-limit
-tests passing. A first trade has been run. Four findings stand out.
+physics stack (layers L0--L5) has been specified, and build steps 1--7 are implemented, with 54 automated
+tests passing (analytic limits plus CoolProp-backed closure tests). A first trade has been run with CoolProp
+properties throughout. Five findings stand out.
 (i)~The optimal cryocooler lift is always either zero or the full heat leak, never in between.
 (ii)~For a vented tank with constant specific masses, the crossover duration has the closed form
 $t^*=h_{fg}\,\mu_\text{act}$ and does not depend on insulation, tank size or environment.
 (iii)~With the Strobridge cooler-mass correlation, a baseline LEO tank gives $t^*\approx\tsH$~days for LH$_2$
 and $\approx\tsO$~days for LO$_2$. This is the same order as the published LEO estimates of $\sim$64 and $\sim$5~days.
-(iv)~Closing the tank shifts the crossover by exactly the hold time. An indicative bound calculation puts the
-LH$_2$ crossover anywhere from $\tcvH$ to $\tchH$~days, depending on the ullage closure. So the well-mixed
-assumption can move the crossover, not just the vent schedule.
+(iv)~The textbook surface-layer closure ($\dot T_i=\Qd/m_\text{surf}c_p$) violates the ordering the bounding
+argument needs: at 90\% fill it stores \emph{more} energy than the fully mixed tank. It was replaced by an
+exact two-zone form whose ordering and collapse are now verified for three propellants and four fill levels.
+(v)~Closing the tank shifts the crossover by roughly the hold time. With the exact bounds, the LH$_2$
+crossover spans $\tcvH$ to $\tchH$~days depending on the ullage closure, and $\tcvO$ to $\tchO$~days for LO$_2$.
+So the well-mixed assumption can move the crossover, not just the vent schedule.
 \end{abstract}
 
 %=====================================================================
@@ -95,12 +99,16 @@ network as its 1-D limit, $R_\text{wall}=t/(kA)$.
 \begin{align}
 \text{vented:}\quad & \md=\Qd_\text{net}/h_{fg},\\
 \text{homogeneous (slow bound):}\quad & \dot u=\Qd_\text{net}/m,\;\; \rho=m/V,\;\; P=P(\rho,u),\\
-\text{surface (fast bound):}\quad & \dot T_i=\Qd_\text{net}/(m_\text{surf}c_p),\;\; P=P_\text{sat}(T_i).
+\text{surface (fast bound):}\quad & \dot u_w=\Qd_\text{net}/m_w,\;\; \rho_w=m_w/V_w,\;\; P=P(\rho_w,u_w).
 \end{align}
 The homogeneous closure is the fully mixed tank, which gives the slowest possible pressure rise. The surface
-closure puts all incoming energy into an interface layer of mass $m_\text{surf}$. Because saturation pressure
-follows the interface temperature, this gives the fast rise seen in stratified tanks. $m_\text{surf}$ is
-swept. With $\Qd_\text{net}$ constant, each closure is summarised by the energy $E_\text{store}$ it can absorb
+closure puts all incoming energy into a \emph{warm zone}: an interface layer of liquid mass $m_\text{surf}$
+together with the ullage vapour ($m_w=m_\text{surf}+m_v$). The rest of the liquid stays at its initial state
+and occupies a fixed volume, so $V_w=V-(m_l-m_\text{surf})/\rho_l$. While the warm zone is two-phase, its
+pressure is the saturation pressure of the interface, which gives the fast rise seen in stratified tanks.
+Because the warm zone is a subset of the tank, $m_\text{surf}\to m_l$ recovers the homogeneous bound exactly.
+The textbook form $\dot T_i=\Qd_\text{net}/(m_\text{surf}c_p)$ was used first and dropped (\S5).
+$m_\text{surf}/m_l$ is swept. With $\Qd_\text{net}$ constant, each closure is summarised by the energy $E_\text{store}$ it can absorb
 before reaching the vent pressure, which gives the hold time $t_\text{hold}=E_\text{store}/\Qd_\text{net}$.
 
 \textbf{L4 Cooling.} The Carnot coefficient of performance is $\text{COP}_C=T_c/(T_h-T_c)$. The specific
@@ -122,7 +130,7 @@ analytic limit can be tested without a property library. Table~\ref{tab:status} 
 
 \begin{table}[!htb]
 \centering\small
-\caption{Build order and status. ``Written'' means the code exists but its tests need CoolProp and have not yet run.}
+\caption{Build order and status. All listed tests run under \texttt{pytest} with CoolProp installed.}
 \label{tab:status}
 \begin{tabular}{@{}llp{9.4cm}@{}}
 \toprule
@@ -132,7 +140,7 @@ Step & Module & Status / verification\\
 3 & L0, L1 & Done. View-factor limits $\{\tfrac12,0\}$; blankets scale as $1/n$; struts verified to be parallel.\\
 4--5 & L4, L5, L3 vented & Done. Carnot limits (14, 2.33~W/W); radiator rejects lift plus work; ZBO balance; zero leak gives exactly zero boil-off.\\
 6 & \texttt{model} (steady) & Done. First end-to-end run; brute-force optimum reproduces analytic $t^*$ (\S\ref{sec:trade}).\\
-7 & L3 closed bounds & Written. Ordering, collapse and energy-closure tests written (need CoolProp).\\
+7 & L3 closed bounds & Done. Ordering holds at every $m_\text{surf}$ for 3 propellants $\times$ 4 fills; collapse exact to $10^{-10}$; energy closes to 0.5\%; liquid-full guard.\\
 8 & L2 port & 1-D form and cylinder$\to$plane limit done; 2-D port pending.\\
 9--10 & \texttt{trade}, app & First crossover sweep done (Fig.~\ref{fig:map}); Streamlit interface not started.\\
 \bottomrule
@@ -227,34 +235,38 @@ t^*_\text{closed}=t^*_\text{vented}+E_\text{store}/\Qd_\text{leak}=t^*_\text{ven
 \end{equation}
 Eq.~\eqref{eq:shift} turns objective~R into a direct comparison: \emph{the ullage assumption matters exactly
 when the spread in hold time between the two bounds is comparable to $t^*$.} Figure~\ref{fig:hold} and
-Table~\ref{tab:closed} evaluate this for venting at 3~bar. The homogeneous bound gives hold times of
-$\thomH$~days (LH$_2$) and $\thomO$~days (LO$_2$). Both are longer than the vented $t^*$. A conduction-only
-interface layer (\S5, item 1) gives $\tcondH$ and $\tcondO$~days. The resulting crossover spans
-$\tcvH$--$\tchH$~days for LH$_2$ and $\tcvO$--$\tchO$~days for LO$_2$. These numbers are indicative: they use
-approximate liquid $c_p$ and $k$~\cite{barron} and a Clausius--Clapeyron $T_\text{sat}(3\,\text{bar})$ until CoolProp
-replaces them. Even so, the spread is a factor of about 7 for LH$_2$ and several hundred for LO$_2$, so the well-mixed assumption can
-plausibly move the crossover, not only the vent schedule. Confirming or refuting this with the exact
-closures is now the first priority.
+Table~\ref{tab:closed} evaluate this for venting at 3~bar, with both closures computed exactly from CoolProp.
+The homogeneous bound gives hold times of $\thomH$~days (LH$_2$) and $\thomO$~days (LO$_2$). Both are longer
+than the vented $t^*$. A thin layer ($m_\text{surf}/m_l=10^{-3}$) holds for only $\thsH$ and $\thsO$~days. A
+conduction-only interface layer (\S5, item 1) gives $\tcondH$ and $\tcondO$~days. The resulting crossover spans
+$\tcvH$--$\tchH$~days for LH$_2$ and $\tcvO$--$\tchO$~days for LO$_2$: a factor of about 7 for LH$_2$ and several
+hundred for LO$_2$. Even the physically anchored conduction layer moves the LH$_2$ crossover from $\tcvH$ to
+$\tccH$~days. \emph{First answer to objective~R: the well-mixed assumption moves the crossover, not only the
+vent schedule.} Where real tanks sit inside the band is what the spring work refines. Below
+$m_\text{surf}/m_l\approx\fdryH$ (LH$_2$) and $\fdryO$ (LO$_2$) the layer evaporates completely before 3~bar
+(dotted in Fig.~\ref{fig:hold}); condensation back onto the cold liquid is neglected there, which only
+speeds up the pressure rise, so the curve remains a valid fast bound.
 
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=0.78\linewidth]{fig4_hold_time_band.pdf}
 \vspace{-1.6em}
-\caption{Hold time to 3~bar against interface-layer mass fraction (surface bound), with the homogeneous
-bound (squares), the conduction-layer anchor (diamonds) and the vented $t^*$ (dashed). Indicative properties.}
+\caption{Hold time to 3~bar against interface-layer mass fraction $m_\text{surf}/m_l$ (two-zone surface
+bound), with the homogeneous bound (squares, reached exactly at $m_\text{surf}/m_l=1$), the conduction-layer
+anchor (diamonds) and the vented $t^*$ (dashed). Dotted: the layer dries out before 3~bar. CoolProp properties.}
 \label{fig:hold}
 \end{figure}
 
 \begin{table}[!htb]
 \centering\small
-\caption{Crossover $t^*$ [days] under each closure (LEO, $r=2$~m, vent at 3~bar). Indicative until the CoolProp run.}
+\caption{Crossover $t^*$ [days] under each closure (LEO, $r=2$~m, 90\% fill, vent at 3~bar). CoolProp properties.}
 \label{tab:closed}
 \begin{tabular}{@{}lcccc@{}}
 \toprule
- & Vented & Surface, $m_\text{surf}/m=10^{-3}$ & Surface, conduction anchor & Homogeneous\\
+ & Vented & Surface, $m_\text{surf}/m_l=10^{-3}$ & Surface, conduction anchor & Homogeneous\\
 \midrule
-LH$_2$ & \tcvH & \tcsH & \tccH\ ($m_\text{surf}/m=\fcondH$) & \tchH\\
-LO$_2$ & \tcvO & \tcsO & \tccO\ ($m_\text{surf}/m=\fcondO$) & \tchO\\
+LH$_2$ & \tcvH & \tcsH & \tccH\ ($m_\text{surf}/m_l=\fcondH$) & \tchH\\
+LO$_2$ & \tcvO & \tcsO & \tccO\ ($m_\text{surf}/m_l=\fcondO$) & \tchO\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -262,19 +274,24 @@ LO$_2$ & \tcvO & \tcsO & \tccO\ ($m_\text{surf}/m=\fcondO$) & \tchO\\
 %=====================================================================
 \section{Issues identified}
 \begin{enumerate}
-\item \textbf{$m_\text{surf}$ needs a physical anchor.} As $m_\text{surf}\to0$ the surface bound has
-$t_\text{hold}\to0$, so a sweep alone cannot rule out any answer. A reference scale comes from constant-flux
+\item \textbf{$m_\text{surf}$ needs a physical anchor.} As $m_\text{surf}\to0$ the surface-bound hold time
+falls to that of the ullage vapour alone (1--2~days here, Fig.~\ref{fig:hold}), so a sweep alone cannot rule
+out any answer. A reference scale comes from constant-flux
 conduction into a semi-infinite liquid~\cite{carslaw}: $\Delta T_s=(2q/k)\sqrt{\alpha t/\pi}$, which gives
 $m_\text{eff}=\tfrac12\rho A\sqrt{\pi\alpha t}$. The sweep will be reported around this anchor.
-\item \textbf{The bounds may not collapse cleanly.} The surface closure uses the liquid $c_p$. The homogeneous
-closure follows the true constant-volume path, which also includes evaporation into the ullage and liquid
-expansion. At $m_\text{surf}=m$ the two stored energies can differ, and \texttt{test\_bounds\_collapse} is
-written to measure this. If the difference is significant, the surface layer will be reformulated on the
-constant-volume saturated path. \texttt{test\_bounds\_ordered} will be run first, because the research claim
-rests on it.
-\item \textbf{Fill fraction limits the pressure band.} LH$_2$ expands strongly on warming. A 90\%-full tank may
-become liquid-full before reaching 3~bar. The $(\rho,u)$ flash captures this, and it will bound the
-admissible fill fraction in the trade.
+\item \textbf{The textbook surface closure broke the ordering (resolved).} \texttt{test\_bounds\_ordered} was
+written before the L3 physics, and it failed on the first CoolProp run. The $c_p$-form surface layer at
+$m_\text{surf}=m$ stored 0.4\% (LO$_2$, LCH$_4$) to 4.4\% (LH$_2$) \emph{more} energy than the homogeneous
+bound at 90\% fill, and 30\% less at 30\% fill, so it neither ordered nor collapsed. The cause: it follows
+liquid $c_p$ along the saturation line and ignores the vapour. In a nearly full tank the swelling liquid
+compresses and condenses the ullage, which releases latent heat, so the constant-volume path needs less
+outside energy. The two-zone form (\S2, L3) applies the exact $(\rho,u)$ closure to the warm zone, so
+collapse holds by construction and ordering is verified for every $m_\text{surf}/m_l$ from $10^{-4}$ to 1. The
+old form is kept in the code as a regression test that records the failure.
+\item \textbf{Fill fraction limits the pressure band.} At 90\% fill LH$_2$ is already 98\% liquid by volume
+when it reaches 3~bar. At 95\% fill all three propellants become liquid-full first, and the vent pressure is
+then reached hydraulically. The model now raises an error in that case rather than returning a subcooled
+state; admissible fill will be a trade variable.
 \item \textbf{Constant $k_\text{eff}$ and placeholder specific masses} (power, radiator, struts) dominate the
 uncertainty in the absolute $t^*$; all are flagged in Table~\ref{tab:params}.
 \end{enumerate}
@@ -289,7 +306,7 @@ uncertainty in the absolute $t^*$; all are flagged in Table~\ref{tab:params}.
 \toprule
 Quantity & Value & Source / status\\
 \midrule
-$T_\text{sat},\ \rho_l,\ h_{fg}$ (LH$_2$/LO$_2$/LCH$_4$, 1 atm) & 20.3/90.2/111.7 K; 70.8/1141/422 kg/m$^3$; 446/213/511 kJ/kg & CoolProp~\cite{coolprop} (reference values)\\
+$T_\text{sat},\ \rho_l,\ h_{fg}$ (LH$_2$/LO$_2$/LCH$_4$, 1 atm) & 20.3/90.2/111.7 K; 70.8/1141/422 kg/m$^3$; 446/213/511 kJ/kg & S (CoolProp~\cite{coolprop})\\
 Cooler mass & $0.2\,\Qd^{0.7}[(T_h-T_c)/T_c]^{1.45}$ kg & S~\cite{plachta2003}\\
 Fraction of Carnot $\eta$ & 0.075 (LH$_2$); 0.20 (LO$_2$, LCH$_4$) & P\\
 MLI areal density & 0.02 kg/m$^2$ per layer & S~\cite{plachta2003}\\
@@ -304,8 +321,10 @@ Strut conductance & $5\times10^{-3}$ W/K & P\\
 %=====================================================================
 \section{Plan to the December milestone}
 \begin{enumerate}
-\item \textbf{Oct, week 1:} Run the CoolProp test suite and rerun \texttt{make\_figures.py}; confirm ordering, measure
-collapse, and replace the indicative closed-tank numbers.
+\item \textbf{Done (September):} CoolProp test suite run; bounds reformulated, ordering and collapse
+verified; all report numbers regenerated from CoolProp.
+\item \textbf{Oct, week 1:} Sweep the closed-tank crossover across radius, environment and fill (Fig.~\ref{fig:map}
+under all three closures); unify the cooler-mass model between the steady driver and the trade.
 \item \textbf{October:} Complete the register (power and radiator specific mass, strut $\int k\,dT$ for G-10 and Ti,
 MLI $k_\text{eff}(T)$), and reconcile the LO$_2$ crossover with~\cite{plachta2003}.
 \item \textbf{October--November:} Port the 2-D solver to L2 (axisymmetric geometry, radiative boundary
@@ -331,6 +350,5 @@ MSFC (to be finalised in the register).
 \bibitem{gilmore} D.~G. Gilmore (ed.), \emph{Spacecraft Thermal Control Handbook}, Vol.~I, 2nd ed., Aerospace
 Press, 2002.
 \bibitem{carslaw} H.~S. Carslaw and J.~C. Jaeger, \emph{Conduction of Heat in Solids}, 2nd ed., Oxford, 1959.
-\bibitem{barron} R.~F. Barron, \emph{Cryogenic Heat Transfer}, Taylor \& Francis, 1999.
 \end{thebibliography}
 \end{document}

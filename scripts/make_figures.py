@@ -1,8 +1,8 @@
 """Preliminary results for the Fall 2026 first written report.
 
-Uses CoolProp when installed. Where it is not installed, falls back to the PROJECT.md s.9 reference values, printed loudly and
-recorded in results.json. Re-run on a machine with CoolProp to replace them:
-    pip install CoolProp && python scripts/make_figures.py
+Requires CoolProp: every fluid property in the report is regenerated from it.
+    pip install -r requirements.txt && python scripts/make_figures.py
+Writes report/figures/*, report/results.json and report/results_macros.tex.
 """
 from __future__ import annotations
 
@@ -35,25 +35,11 @@ P0 = 101325.0
 # ------------------------------------------------------------------ fluid ---
 FLUIDS = ["Hydrogen", "Methane", "Oxygen"]
 LABEL = {"Hydrogen": "LH$_2$", "Methane": "LCH$_4$", "Oxygen": "LO$_2$"}
-# PROJECT.md s.9 reference values: no-CoolProp fallback ONLY (not a property source)
-REF = {"Hydrogen": dict(T_sat=20.3, rho_l=70.8, h_fg=446e3),
-       "Methane": dict(T_sat=111.7, rho_l=422.0, h_fg=511e3),
-       "Oxygen": dict(T_sat=90.2, rho_l=1141.0, h_fg=213e3)}
-# INDICATIVE liquid cp and k near the normal boiling point, for the closed-tank
-# order-of-magnitude estimate only. Approximate handbook values (Barron, Cryogenic
-# Heat Transfer); replaced by CoolProp cp_l_sat / conductivity in production.
-INDICATIVE = {"Hydrogen": dict(cp=9.7e3, k=0.10, M=2.016e-3),
-              "Methane": dict(cp=3.5e3, k=0.18, M=16.04e-3),
-              "Oxygen": dict(cp=1.7e3, k=0.15, M=32.00e-3)}
-
-if props.coolprop_available():
-    SRC = "CoolProp"
-    SAT = {f: dict(T_sat=props.T_sat(f, P0), rho_l=props.rho_l_sat(f, P0),
-                   h_fg=props.h_fg(f, P0)) for f in FLUIDS}
-else:
-    SRC = "PROJECT.md reference values (CoolProp unavailable)"
-    SAT = REF
-    print("WARNING: CoolProp not installed - using PROJECT.md s.9 reference values")
+if not props.coolprop_available():
+    sys.exit("CoolProp is required: pip install -r requirements.txt")
+SRC = "CoolProp"
+SAT = {f: dict(T_sat=props.T_sat(f, P0), rho_l=props.rho_l_sat(f, P0),
+               h_fg=props.h_fg(f, P0)) for f in FLUIDS}
 
 # ------------------------------------------------------------- parameters ---
 ETA = {"Hydrogen": 0.075, "Methane": 0.20, "Oxygen": 0.20}
@@ -185,57 +171,67 @@ save(fig, "fig3_crossover_map")
 results["crossover_map_days"] = cmap
 
 # ===================== Fig 4: closed-tank hold-time band ===================
-# With CoolProp: E_hom from model.stored_energy (exact (rho,u) path) and E_surf
-# from the cp integral to T_sat(P_max). Without it: INDICATIVE cp, k and a
-# Clausius-Clapeyron T_sat(P_max), and E_hom is approximated by E_surf(m_total).
+# Exact closures (model.stored_energy). Surface bound = two-zone form: the
+# interface layer m_surf plus the ullage vapour absorb Q; the rest of the
+# liquid is inert. m_surf/m_liquid = 1 is the homogeneous bound exactly.
+from scipy.optimize import brentq  # noqa: E402
+
 from cryosand.core.types import TankGeometry  # noqa: E402
-from cryosand.model import ClosedTankSpec, stored_energy  # noqa: E402
+from cryosand.model import ClosedTankSpec, stored_energy, warm_zone_initial  # noqa: E402
 
 fig, ax = plt.subplots(figsize=(6.5, 2.8))
-frac = np.logspace(-4, 0, 200)
+frac = np.logspace(-4, 0, 121)
 hold = {}
 for f in ["Hydrogen", "Oxygen"]:
-    s, ind = SAT[f], INDICATIVE[f]
+    s = SAT[f]
     c = case(f, T_leo, r0)
     _, n_p = best_passive(c, results["fig2"][f]["t_star_days"] * DAY, UllageClosure.VENTED, 0.0)
     Q = Q_leak(c, n_p)
     V, A = geom(r0)
+    g = TankGeometry(r0, 1.5 * r0, T_WALL, "Al6061", FILL)
     m = s["rho_l"] * FILL * V
-    if props.coolprop_available():
-        g = TankGeometry(r0, 1.5 * r0, T_WALL, "Al6061", FILL)
-        Tmax = props.T_sat(f, P_MAX)
-        cp, k = props.cp_l_sat(f, s["T_sat"]), props.k_l_sat(f, P0)
-        E_s1 = stored_energy(UllageClosure.SURFACE, f, g, P0, ClosedTankSpec(P_MAX, 1.0))
-        E_h = stored_energy(UllageClosure.HOMOGENEOUS, f, g, P0, ClosedTankSpec(P_MAX))
-    else:
-        Tmax = 1.0 / (1.0 / s["T_sat"] - 8.314 / (s["h_fg"] * ind["M"]) * math.log(P_MAX / P0))
-        cp, k = ind["cp"], ind["k"]
-        E_s1 = m * cp * (Tmax - s["T_sat"])
-        E_h = E_s1
-    dT = Tmax - s["T_sat"]
-    t_h = frac * E_s1 / Q / DAY
+    E_of = lambda x, f=f, g=g: stored_energy(UllageClosure.SURFACE, f, g, P0,  # noqa: E731
+                                             ClosedTankSpec(P_MAX, min(x, 1.0)))
+    E_h = stored_energy(UllageClosure.HOMOGENEOUS, f, g, P0, ClosedTankSpec(P_MAX))
+    E_s = np.array([E_of(x) for x in frac])
+    t_h = E_s / Q / DAY
+    # warm zone dries out (all layer liquid evaporates before P_max) below f_dry
+    rho_v_max = props.rho_v_sat(f, P_MAX)
+    dry = np.array([warm_zone_initial(UllageClosure.SURFACE, f, g, P0,
+                                      ClosedTankSpec(P_MAX, x))[1] < rho_v_max for x in frac])
+    f_dry = float(frac[dry].max()) if dry.any() else 0.0
+    # conduction anchor: the layer mass a stagnant conduction layer reaches by
+    # the time it has absorbed its own stored energy, E(m_cond(t)) = Q t
+    cp, k = props.cp_l_sat(f, s["T_sat"]), props.k_l_sat(f, P0)
     alpha = k / (s["rho_l"] * cp)
     A_int = math.pi * r0**2
-    # conduction anchor: solve 0.5 rho A sqrt(pi alpha t) cp dT = Q t for t
-    t_cond = (0.5 * s["rho_l"] * A_int * math.sqrt(math.pi * alpha) * cp * dT / Q) ** 2
-    m_cond = L3.m_surf_conduction(s["rho_l"], alpha, A_int, t_cond)
-    ax.loglog(frac, t_h, color=COL[f])
+    m_c = lambda t: L3.m_surf_conduction(s["rho_l"], alpha, A_int, t)  # noqa: E731
+    t_cond = brentq(lambda t: E_of(m_c(t) / m) - Q * t, 1.0, 10.0 * E_h / Q, xtol=1.0)
+    f_cond = m_c(t_cond) / m
+    ax.loglog(frac[~dry], t_h[~dry], color=COL[f])
+    ax.loglog(frac[dry], t_h[dry], ":", color=COL[f])
     ax.plot(1.0, E_h / Q / DAY, "s", ms=6, color=COL[f], mec="white", mew=1.2, zorder=5)
     ax.axhline(results["fig2"][f]["t_star_days"], color=COL[f], ls="--", lw=1.1)
-    ax.plot(m_cond / m, t_cond / DAY, "D", ms=6, color=COL[f], mec="white", mew=1.2, zorder=5)
-    ax.annotate(f"{LABEL[f]} surface bound", (frac[0], t_h[0]),
-                xytext=(4, -13) if f == "Hydrogen" else (4, 10),
-                textcoords="offset points", ha="left", color=INK)
-    ax.annotate(f"{LABEL[f]} vented $t^*$", (1e-4, results["fig2"][f]["t_star_days"]),
-                xytext=(2, 3), textcoords="offset points", color=INK2, fontsize=7.5)
-    hold[f] = dict(Q_leak=Q, n=n_p, m_liquid=m, T_max=Tmax, dT=dT, alpha=alpha, cp=cp, k=k,
-                   E_surf_full=E_s1, E_hom=E_h, t_hold_homog_days=E_h / Q / DAY,
-                   t_hold_cond_days=t_cond / DAY, m_cond_frac=m_cond / m)
+    ax.plot(f_cond, t_cond / DAY, "D", ms=6, color=COL[f], mec="white", mew=1.2, zorder=5)
+    i_lab = 55 if f == "Hydrogen" else 60
+    ax.annotate(f"{LABEL[f]} surface bound", (frac[i_lab], t_h[i_lab]),
+                xytext=(0, 8) if f == "Hydrogen" else (0, -18),
+                textcoords="offset points", ha="right" if f == "Hydrogen" else "center",
+                color=INK)
+    x_vent, dy = (2e-3, 3) if f == "Hydrogen" else (2e-3, -10)
+    ax.annotate(f"{LABEL[f]} vented $t^*$", (x_vent, results["fig2"][f]["t_star_days"]),
+                xytext=(2, dy), textcoords="offset points", color=INK2, fontsize=7.5)
+    hold[f] = dict(Q_leak=Q, n=n_p, m_liquid=m, T_max=props.T_sat(f, P_MAX),
+                   dT=props.T_sat(f, P_MAX) - s["T_sat"], alpha=alpha, cp=cp, k=k,
+                   E_hom=E_h, E_surf_1e3=E_of(1e-3), t_hold_homog_days=E_h / Q / DAY,
+                   t_hold_s3_days=E_of(1e-3) / Q / DAY, t_hold_cond_days=t_cond / DAY,
+                   m_cond_frac=f_cond, E_cond=E_of(f_cond), f_dry=f_dry)
 ax.plot([], [], "s", color=INK2, label="homogeneous bound")
 ax.plot([], [], "D", color=INK2, label="conduction-layer anchor")
+ax.plot([], [], ":", color=INK2, label="layer dries out before 3 bar")
 ax.legend(loc="lower right", fontsize=7.5)
-ax.set(xlabel="Interface-layer mass fraction $m_{surf}/m_{total}$",
-       ylabel="Hold time to 3 bar [days]", ylim=(1e-3, 3e4))
+ax.set(xlabel="Interface-layer mass fraction $m_{surf}/m_{liquid}$",
+       ylabel="Hold time to 3 bar [days]")
 save(fig, "fig4_hold_time_band")
 results["hold_time"] = hold
 
@@ -245,8 +241,8 @@ for f in ["Hydrogen", "Oxygen"]:
     h = hold[f]
     c = case(f, T_leo, r0)
     row = {"vented": t_crossover(c, UllageClosure.VENTED, 0.0) / DAY}
-    for lab, cl, E in [("s3", UllageClosure.SURFACE, 1e-3 * h["E_surf_full"]),
-                       ("cond", UllageClosure.SURFACE, h["m_cond_frac"] * h["E_surf_full"]),
+    for lab, cl, E in [("s3", UllageClosure.SURFACE, h["E_surf_1e3"]),
+                       ("cond", UllageClosure.SURFACE, h["E_cond"]),
                        ("hom", UllageClosure.HOMOGENEOUS, h["E_hom"])]:
         row[lab] = t_crossover(c, cl, E) / DAY
     shift[f] = row
@@ -275,8 +271,7 @@ cz = {f: case(f, T_leo, r0) for f in FLUIDS}
 nz = {f: best_zbo(cz[f])[1] for f in FLUIDS}
 Qz = {f: Q_leak(cz[f], nz[f]) for f in FLUIDS}
 macros = {
-    "PropSource": "CoolProp" if props.coolprop_available() else
-                  "the reference values of Table~\\ref{tab:params} (CoolProp run pending)",
+    "PropSource": "computed with CoolProp",
     "FLeo": f"{F_leo:.3f}",
     "qLeo": f"{E['LEO 400 km']['q_abs']:.0f}", "TsLeo": f"{E['LEO 400 km']['T_s']:.0f}",
     "qDeep": f"{E['Deep space, 1 AU']['q_abs']:.0f}", "TsDeep": f"{E['Deep space, 1 AU']['T_s']:.0f}",
@@ -307,6 +302,7 @@ for f, tag in [("Hydrogen", "H"), ("Oxygen", "O")]:
         f"Qhold{tag}": f"{h['Q_leak']:.1f}", f"mliq{tag}": f"{h['m_liquid']:,.0f}".replace(",", "{,}"),
         f"dT{tag}": f"{h['dT']:.1f}", f"thom{tag}": f"{h['t_hold_homog_days']:.0f}",
         f"tcond{tag}": f"{h['t_hold_cond_days']:.0f}", f"fcond{tag}": f"{h['m_cond_frac']:.3f}",
+        f"ths{tag}": g3(h['t_hold_s3_days']), f"fdry{tag}": sci(h['f_dry'], 0) if h['f_dry'] else "0",
         f"tcv{tag}": g3(sh['vented']), f"tcs{tag}": g3(sh['s3']),
         f"tcc{tag}": g3(sh['cond']), f"tch{tag}": g3(sh['hom']),
     })
