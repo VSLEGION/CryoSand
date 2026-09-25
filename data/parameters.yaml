@@ -37,3 +37,20 @@ wall:
   material: Al6061
   thickness: 0.002
   k: {value: 10.0, unit: W/(m K), status: provisional, note: "pessimistic low-T value; only used to show R_wall is negligible"}
+
+# ---------------------------------------------------------------------------
+# Scenario definition. Read by cryosand/scenario.py, which feeds both
+# scripts/run_case.py and scripts/make_figures.py. Edit HERE, not in scripts.
+# ---------------------------------------------------------------------------
+baseline:
+  P_storage: {value: 101325.0, unit: Pa, note: "1 atm storage pressure"}
+  fill_fraction: {value: 0.9, note: "liquid volume / tank volume"}
+  P_vent: {value: 300000.0, unit: Pa, note: "closed-tank vent set point"}
+  radius: {value: 2.0, unit: m}
+  length_over_radius: {value: 1.5, note: "cylindrical section length / radius"}
+  design_unit_layers: {value: 10, note: "trade optimises over n sub-blankets of this many MLI layers"}
+
+environments:
+  leo:  {label: "LEO 400 km", distance_AU: 1.0, altitude: 400000.0, planet: earth}
+  deep: {label: "Deep space, 1 AU", distance_AU: 1.0, altitude: null, planet: null}
+  mars: {label: "Mars transfer, 1.52 AU", distance_AU: 1.52, altitude: null, planet: null}

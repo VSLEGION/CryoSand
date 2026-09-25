@@ -98,3 +98,19 @@ def test_energy_balance(closure, f):
 
 def test_boiloff_published():
     pytest.skip("Awaiting MHTB / GFSSP demonstration-tank data in the Stage 1 register")
+
+
+def test_run_case_reproduces_report_baseline():
+    """scripts/run_case.py agrees with the report (LH2, LEO, r = 2 m)."""
+    import importlib.util
+    from pathlib import Path
+    from cryosand import scenario as S
+    path = Path(__file__).resolve().parents[1] / "scripts" / "run_case.py"
+    spec = importlib.util.spec_from_file_location("run_case", path)
+    rc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rc)
+    p = S.load_params()
+    r = rc.run(p, "Hydrogen", "leo", 2.0, 0.9, 57.27, 3.0e5, 1.0)
+    assert r["t_star_vented_days"] == pytest.approx(57.27, abs=0.05)
+    assert r["t_star_hom_days"] == pytest.approx(377.3, abs=0.5)
+    assert r["t_star_surf_days"] == pytest.approx(r["t_star_hom_days"], rel=1e-9)  # collapse

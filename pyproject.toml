@@ -3,7 +3,7 @@ name = "cryosand"
 version = "0.1.0"
 description = "Open trade-space sandbox for in-space cryogenic propellant storage"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26", "scipy>=1.11", "matplotlib>=3.8", "CoolProp>=6.6"]
+dependencies = ["numpy>=1.26", "scipy>=1.11", "matplotlib>=3.8", "CoolProp>=6.6", "PyYAML>=6.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]

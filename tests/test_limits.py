@@ -181,3 +181,28 @@ def test_trade_leak_matches_layer_physics():
                   T_reject=300.0, s_pow=0.025, s_rad=5.0, q_rad=400.0)
     ref = L1.heat_leak(_stack(n), A, Th, Tc, R_w).Q_total
     assert math.isclose(Q_leak(c, n), ref, rel_tol=1e-12)
+
+
+# ------------------------------------------------------ register / trade ---
+def test_register_loads_report_baseline():
+    """The register reproduces the report's baseline inputs (property-free)."""
+    from cryosand import scenario as S
+    p = S.load_params()
+    assert math.isclose(p.unit_thickness, 0.025 / 3, rel_tol=1e-12)
+    assert math.isclose(p.unit_areal_density, 0.2, rel_tol=1e-12)
+    assert isinstance(p.P_vent, float) and p.P_vent == 3.0e5
+    assert math.isclose(S.environment(p, "leo")["T_s"], 259.0, abs_tol=0.05)
+    assert S.tank(p).length == 1.5 * p.radius
+
+
+def test_mass_breakdowns_sum_to_totals():
+    from cryosand.trade import (TradeCase, passive_breakdown, passive_mass, zbo_breakdown,
+                                zbo_mass)
+    c = TradeCase(h_fg=4.46e5, T_cold=20.3, T_hot=259.0, A=88.0, G_strut=5e-3,
+                  t_blanket=0.025 / 3, k_eff=3e-5, rho_A_blanket=0.2, R_wall=2e-6,
+                  eta_carnot=0.075, T_reject=300.0, s_pow=0.025, s_rad=5.0, q_rad=410.0)
+    for n in (1, 6, 40):
+        assert math.isclose(sum(zbo_breakdown(c, n).values()), zbo_mass(c, n), rel_tol=1e-12)
+        for cl, E in ((UllageClosure.VENTED, 0.0), (UllageClosure.HOMOGENEOUS, 1e8)):
+            assert math.isclose(sum(passive_breakdown(c, n, 3e6, cl, E).values()),
+                                passive_mass(c, n, 3e6, cl, E), rel_tol=1e-12)

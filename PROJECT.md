@@ -385,8 +385,8 @@ LEO baseline. All report numbers regenerated from CoolProp.
   all three closures).
 - One cooler-mass model: `model.run_steady` uses linear `specific_mass`, while
   `trade.py` and the figures use the Strobridge correlation.
-- Load `data/parameters.yaml` in `make_figures.py` instead of duplicating values;
-  source every `provisional` entry.
+- Source every `provisional` entry in `data/parameters.yaml` (now the single
+  source for `run_case.py` and `make_figures.py` via `cryosand/scenario.py`).
 - Step 8 (2-D L2 port), `test_boiloff_published` (MHTB), step 10 (Streamlit).
 
 **Deferred to spring:** two-phase CFD dataset and trained surrogate; modified

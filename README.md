@@ -3,9 +3,13 @@
 Open trade-space sandbox for in-space cryogenic propellant storage. See PROJECT.md for the
 physics specification and conventions.
 
+**New here? Start with [docs/RUNNING.md](docs/RUNNING.md)**: setup, running cases and sweeps,
+recording results, and regenerating the report.
+
 ## Setup (laptop)
     pip install -r requirements.txt
     python -m pytest                 # all tests; CoolProp is required, CI enforces it
+    python scripts/run_case.py       # one case from data/parameters.yaml (see --help)
     python scripts/make_figures.py   # regenerates report/figures, results.json, results_macros.tex
     cd report && latexmk -pdf CryoSand_FirstReport.tex
 
@@ -17,6 +21,9 @@ fluid property comes from CoolProp. The script refuses to run without CoolProp.
     cryosand/layers    L0-L5 physics (pure functions)
     cryosand/model.py  steady assembly + closed-tank bounds (CoolProp)
     cryosand/trade.py  passive vs ZBO optimisation, crossover
+    cryosand/scenario.py   parameter register -> model inputs
+    scripts/run_case.py    your experiments -> runs/ (with provenance)
     tests/             test_limits.py (property-free), test_coolprop.py
-    data/parameters.yaml   parameter register (sourced / provisional)
+    data/parameters.yaml   parameter register (sourced / provisional): the ONLY place values live
+    runs/                  saved runs + LOG.md lab notebook
     report/            LaTeX first written report

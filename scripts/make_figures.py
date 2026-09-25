@@ -18,6 +18,7 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cryosand.core import constants as C  # noqa: E402
+from cryosand import scenario as S  # noqa: E402
 from cryosand.core import properties as props  # noqa: E402
 from cryosand.core.types import UllageClosure  # noqa: E402
 from cryosand.layers import l0_environment as L0  # noqa: E402
@@ -32,53 +33,38 @@ OUT.mkdir(parents=True, exist_ok=True)
 DAY = C.SECONDS_PER_DAY
 P0 = 101325.0
 
-# ------------------------------------------------------------------ fluid ---
-FLUIDS = ["Hydrogen", "Methane", "Oxygen"]
-LABEL = {"Hydrogen": "LH$_2$", "Methane": "LCH$_4$", "Oxygen": "LO$_2$"}
+# ------------------------------------------------------------- parameters ---
+# Every value comes from data/parameters.yaml via cryosand.scenario.
 if not props.coolprop_available():
     sys.exit("CoolProp is required: pip install -r requirements.txt")
+PAR = S.load_params()
+P0 = PAR.P_storage
+FLUIDS = ["Hydrogen", "Methane", "Oxygen"]
+LABEL = {"Hydrogen": "LH$_2$", "Methane": "LCH$_4$", "Oxygen": "LO$_2$"}
 SRC = "CoolProp"
-SAT = {f: dict(T_sat=props.T_sat(f, P0), rho_l=props.rho_l_sat(f, P0),
-               h_fg=props.h_fg(f, P0)) for f in FLUIDS}
-
-# ------------------------------------------------------------- parameters ---
-ETA = {"Hydrogen": 0.075, "Methane": 0.20, "Oxygen": 0.20}
-T_REJECT, T_RAD, EPS_RAD, S_RAD, S_POW = 300.0, 300.0, 0.9, 5.0, 0.025
-ALPHA_OUT, EPS_OUT = 0.32, 0.86
-# design unit = 10-layer sub-blanket (30 layers = 25 mm => 8.33 mm per 10 layers)
-BLANKET_T, K_EFF, RHO_A_BLANKET = 0.025 / 3, 3.0e-5, 10 * 0.02
-G_STRUT, T_WALL, K_WALL = 5.0e-3, 0.002, 10.0
-FILL, P_MAX = 0.9, 3.0e5
+SAT = {f: S.saturated(f, PAR) for f in FLUIDS}
+ETA = PAR.eta_carnot
+T_REJECT, T_RAD, EPS_RAD = PAR.T_reject, PAR.T_rad, PAR.eps_rad
+EPS_OUT = PAR.eps_out
+BLANKET_T, K_EFF = PAR.unit_thickness, PAR.k_eff
+G_STRUT, T_WALL, K_WALL = PAR.G_strut, PAR.wall_thickness, PAR.k_wall
+FILL, P_MAX = PAR.fill, PAR.P_vent
+UNIT = PAR.unit_layers
 
 
 def env_presets():
-    F_leo = L0.view_factor_sphere_to_earth(400e3, C.R_EARTH)
-    presets = {
-        "LEO 400 km": L0.absorbed_flux(ALPHA_OUT, EPS_OUT, C.G_SUN_1AU, C.ALBEDO_EARTH,
-                                       C.G_IR_EARTH, F_leo),
-        "Deep space, 1 AU": L0.absorbed_flux(ALPHA_OUT, EPS_OUT, C.G_SUN_1AU, 0.0, 0.0, 0.0),
-        "Mars transfer, 1.52 AU": L0.absorbed_flux(ALPHA_OUT, EPS_OUT,
-                                                   L0.solar_flux(1.52, C.G_SUN_1AU), 0.0, 0.0, 0.0),
-    }
-    return {k: dict(q_abs=q, T_s=L0.surface_temperature(q, EPS_OUT, C.T_DEEP_SPACE))
-            for k, q in presets.items()}, F_leo
+    envs = {S.environment(PAR, k)["label"]: S.environment(PAR, k) for k in PAR.environments}
+    F_leo = S.environment(PAR, "leo")["F_planet"]
+    return {k: dict(q_abs=v["q_abs"], T_s=v["T_s"]) for k, v in envs.items()}, F_leo
 
 
 def geom(r):
-    L = 1.5 * r  # cylinder section; total length 3.5 r
-    V = math.pi * r**2 * L + 4 / 3 * math.pi * r**3
-    A = 2 * math.pi * r * L + 4 * math.pi * r**2
-    return V, A
+    g = S.tank(PAR, r)
+    return g.volume, g.surface_area
 
 
 def case(fluid, T_s, r):
-    V, A = geom(r)
-    return TradeCase(h_fg=SAT[fluid]["h_fg"], T_cold=SAT[fluid]["T_sat"], T_hot=T_s, A=A,
-                     G_strut=G_STRUT,  # held constant across scale (provisional)
-                     t_blanket=BLANKET_T, k_eff=K_EFF, rho_A_blanket=RHO_A_BLANKET,
-                     R_wall=L2.R_wall_plane(T_WALL, K_WALL, A), eta_carnot=ETA[fluid],
-                     T_reject=T_REJECT, s_pow=S_POW, s_rad=S_RAD,
-                     q_rad=L4.radiator_flux(EPS_RAD, T_RAD, C.T_DEEP_SPACE))
+    return S.trade_case(PAR, fluid, T_s, r)
 
 
 # ----------------------------------------------------------------- style ---
@@ -127,7 +113,7 @@ ax[0].legend(loc="upper right", fontsize=7.5)
 save(fig, "fig1_cooler_asymmetry")
 
 # ======================================== Fig 2: mass vs mission duration ===
-r0 = 2.0
+r0 = PAR.radius
 T_leo = ENV["LEO 400 km"]["T_s"]
 days = np.logspace(0, 3.3, 200)
 fig, ax = plt.subplots(1, 2, figsize=(6.5, 2.7), sharey=False)
@@ -176,7 +162,6 @@ results["crossover_map_days"] = cmap
 # liquid is inert. m_surf/m_liquid = 1 is the homogeneous bound exactly.
 from scipy.optimize import brentq  # noqa: E402
 
-from cryosand.core.types import TankGeometry  # noqa: E402
 from cryosand.model import ClosedTankSpec, stored_energy, warm_zone_initial  # noqa: E402
 
 fig, ax = plt.subplots(figsize=(6.5, 2.8))
@@ -188,7 +173,7 @@ for f in ["Hydrogen", "Oxygen"]:
     _, n_p = best_passive(c, results["fig2"][f]["t_star_days"] * DAY, UllageClosure.VENTED, 0.0)
     Q = Q_leak(c, n_p)
     V, A = geom(r0)
-    g = TankGeometry(r0, 1.5 * r0, T_WALL, "Al6061", FILL)
+    g = S.tank(PAR, r0)
     m = s["rho_l"] * FILL * V
     E_of = lambda x, f=f, g=g: stored_energy(UllageClosure.SURFACE, f, g, P0,  # noqa: E731
                                              ClosedTankSpec(P_MAX, min(x, 1.0)))
@@ -289,7 +274,7 @@ macros = {
     "tsH": f"{F2['Hydrogen']['t_star_days']:.0f}", "tsO": f"{F2['Oxygen']['t_star_days']:.1f}",
     "tsM": f"{CM['Methane | LEO 400 km'][2.0]:.1f}",
     "mzH": f"{F2['Hydrogen']['m_zbo']:.0f}", "mzO": f"{F2['Oxygen']['m_zbo']:.0f}",
-    "nzH": f"{10 * nz['Hydrogen']}", "QzH": f"{Qz['Hydrogen']:.1f}",
+    "nzH": f"{UNIT * nz['Hydrogen']}", "QzH": f"{Qz['Hydrogen']:.1f}",
     "StrutShareH": f"{100 * G_STRUT * (T_leo - SAT['Hydrogen']['T_sat']) / Qz['Hydrogen']:.0f}",
     "tsHsmall": f"{CM['Hydrogen | LEO 400 km'][0.75]:.0f}", "tsHbig": f"{CM['Hydrogen | LEO 400 km'][5.0]:.0f}",
     "tsOsmall": f"{CM['Oxygen | LEO 400 km'][0.75]:.1f}", "tsObig": f"{CM['Oxygen | LEO 400 km'][5.0]:.1f}",

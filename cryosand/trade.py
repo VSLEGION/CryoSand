@@ -82,3 +82,23 @@ def t_crossover(c: TradeCase, closure: UllageClosure, E_store: float,
         if t_hi / t_lo - 1.0 < 1e-9:
             break
     return math.sqrt(t_lo * t_hi)
+
+
+# ------------------------------------------------------ mass breakdowns ---
+def passive_breakdown(c: TradeCase, n: int, t: float, closure: UllageClosure,
+                      E_store: float) -> dict:
+    """Components of passive_mass [kg]. Sums to passive_mass exactly."""
+    Q = Q_leak(c, n)
+    E_s = 0.0 if closure is UllageClosure.VENTED else E_store
+    return dict(m_insulation=n * c.rho_A_blanket * c.A, m_cooler=0.0, m_power=0.0,
+                m_radiator=0.0, m_lost=max(Q * t - E_s, 0.0) / c.h_fg)
+
+
+def zbo_breakdown(c: TradeCase, n: int) -> dict:
+    """Components of zbo_mass [kg]. Sums to zbo_mass exactly."""
+    Q = Q_leak(c, n)
+    phi = L4.specific_power(c.T_cold, c.T_reject, c.eta_carnot)
+    return dict(m_insulation=n * c.rho_A_blanket * c.A,
+                m_cooler=L4.cooler_mass_strobridge(Q, c.T_cold, c.T_reject),
+                m_power=c.s_pow * phi * Q, m_radiator=c.s_rad * (1.0 + phi) * Q / c.q_rad,
+                m_lost=0.0)
