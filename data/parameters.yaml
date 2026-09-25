@@ -1,0 +1,39 @@
+# CryoSand parameter register (Stage 1, in progress). SI units.
+# status: sourced | provisional (placeholder, must be sourced before publication)
+
+cryocooler:
+  mass_correlation:
+    form: "m_cooler = 0.2 * Q_lift**0.7 * ((T_reject - T_cold)/T_cold)**1.45   [kg, Q in W]"
+    source: "Plachta & Kittel (2003), NASA/TM (NTRS 20030067928): Strobridge correlation x0.2"
+    status: sourced
+  eta_carnot:
+    Hydrogen: {value: 0.075, range: [0.05, 0.10], status: provisional, note: "PROJECT.md s.4 table"}
+    Methane:  {value: 0.20,  range: [0.15, 0.25], status: provisional}
+    Oxygen:   {value: 0.20,  range: [0.15, 0.25], status: provisional}
+  T_reject: {value: 300.0, status: provisional, note: "held fixed; interior optimum exists"}
+
+power_system:
+  specific_mass: {value: 0.025, unit: kg/W, status: provisional, note: "~40 W/kg array+PMAD; source needed"}
+
+radiator:
+  areal_density: {value: 5.0, unit: kg/m^2, status: provisional, note: "source needed"}
+  emissivity: {value: 0.9, status: provisional}
+  T_radiator: {value: 300.0, unit: K, status: provisional}
+
+mli:
+  per_layer_areal_density: {value: 0.02, unit: kg/m^2, source: "Plachta & Kittel (2003)", status: sourced}
+  blanket:
+    layers: 30
+    thickness: {value: 0.025, unit: m, status: provisional}
+    k_eff: {value: 3.0e-5, unit: W/(m K), status: provisional, note: "PROJECT.md s.9 'good MLI'; T-dependence ignored"}
+  outer_cover:
+    alpha: {value: 0.32, status: provisional, note: "beta-cloth class; confirm in Gilmore (2002) App. A"}
+    eps: {value: 0.86, status: provisional}
+
+struts:
+  conductance: {value: 5.0e-3, unit: W/K, status: provisional, note: "placeholder; k_bar integral from G-10/Ti data pending"}
+
+wall:
+  material: Al6061
+  thickness: 0.002
+  k: {value: 10.0, unit: W/(m K), status: provisional, note: "pessimistic low-T value; only used to show R_wall is negligible"}
