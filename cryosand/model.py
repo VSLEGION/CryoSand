@@ -31,8 +31,12 @@ def saturated_state(fluid: str, P: float) -> SaturatedState:
 # ------------------------------------------------------ closed-tank bounds ---
 @dataclass(frozen=True)
 class ClosedTankSpec:
-    P_max: float                 # Pa, vent set point
-    m_surf_fraction: float = 1.0  # SURFACE only: m_surf / m_total (swept)
+    P_max: float                  # Pa, vent set point
+    surf_fraction: float = 1.0    # SURFACE only: m_surf / m_liquid (swept)
+
+
+class LiquidFullError(ValueError):
+    """The (warm zone of the) tank fills with liquid before reaching P_max."""
 
 
 def homogeneous_initial(fluid: str, geom: TankGeometry, P0: float):
@@ -42,41 +46,46 @@ def homogeneous_initial(fluid: str, geom: TankGeometry, P0: float):
                                 props.u_l_sat(fluid, P0), props.u_v_sat(fluid, P0))
 
 
+def warm_zone_initial(closure: UllageClosure, fluid: str, geom: TankGeometry, P0: float,
+                      spec: ClosedTankSpec):
+    """(m, rho, u0) of the zone that absorbs Q_net: the whole tank for
+    HOMOGENEOUS, the interface layer plus ullage vapour for SURFACE."""
+    if closure is UllageClosure.HOMOGENEOUS:
+        return homogeneous_initial(fluid, geom, P0)
+    if closure is UllageClosure.SURFACE:
+        return L3.two_zone_warm_state(geom.fill_fraction, geom.volume, spec.surf_fraction,
+                                      props.rho_l_sat(fluid, P0), props.rho_v_sat(fluid, P0),
+                                      props.u_l_sat(fluid, P0), props.u_v_sat(fluid, P0))
+    raise ValueError("defined for the closed closures only")
+
+
 def stored_energy(closure: UllageClosure, fluid: str, geom: TankGeometry, P0: float,
                   spec: ClosedTankSpec | None) -> float:
-    """Energy a closed tank absorbs between P0 and spec.P_max [J]."""
+    """Energy a closed tank absorbs between P0 and spec.P_max [J].
+
+    Raises LiquidFullError if the absorbing zone becomes liquid-full first:
+    then the vent pressure is reached hydraulically and neither bound applies.
+    """
     if closure is UllageClosure.VENTED:
         return 0.0
-    m, rho, u0 = homogeneous_initial(fluid, geom, P0)
-    if closure is UllageClosure.HOMOGENEOUS:
-        u_max = props._props("U", "D", rho, "P", spec.P_max, fluid)
-        return L3.stored_energy_homogeneous(m, u0, u_max)
-    if closure is UllageClosure.SURFACE:
-        m_surf = spec.m_surf_fraction * m
-        return L3.stored_energy_surface(m_surf, lambda T: props.cp_l_sat(fluid, T),
-                                        props.T_sat(fluid, P0), props.T_sat(fluid, spec.P_max))
-    raise ValueError(closure)
+    if spec is None:
+        raise ValueError("closed closures need a ClosedTankSpec")
+    m, rho, u0 = warm_zone_initial(closure, fluid, geom, P0, spec)
+    if rho > props.rho_l_sat(fluid, spec.P_max):
+        raise LiquidFullError(
+            f"{fluid}, fill {geom.fill_fraction}: liquid-full before "
+            f"{spec.P_max:.0f} Pa (rho {rho:.2f} > rho_l_sat {props.rho_l_sat(fluid, spec.P_max):.2f})")
+    u_max = props.u_from_rho_P(fluid, rho, spec.P_max)
+    return L3.stored_energy_homogeneous(m, u0, u_max)
 
 
 def pressure_history(closure: UllageClosure, fluid: str, geom: TankGeometry, P0: float,
                      Q_net: float, t: np.ndarray, spec: ClosedTankSpec) -> np.ndarray:
-    """Closed-tank pressure P(t) [Pa] under either bound (no venting)."""
-    m, rho, u0 = homogeneous_initial(fluid, geom, P0)
-    if closure is UllageClosure.HOMOGENEOUS:
-        return np.array([props.P_from_rho_u(fluid, rho, u0 + L3.du_dt_homogeneous(Q_net, m) * ti)
-                         for ti in t])
-    if closure is UllageClosure.SURFACE:
-        m_surf = spec.m_surf_fraction * m
-        T0 = props.T_sat(fluid, P0)
-        # integrate dT/dt = Q/(m_surf cp(T)) with cp evaluated along the way
-        T, out, t_prev = T0, [], 0.0
-        for ti in t:
-            dt = ti - t_prev
-            T += L3.dT_dt_surface(Q_net, m_surf, props.cp_l_sat(fluid, T)) * dt
-            out.append(props.P_sat(fluid, T))
-            t_prev = ti
-        return np.array(out)
-    raise ValueError("pressure history is defined for the closed closures only")
+    """Closed-tank pressure P(t) [Pa] under either bound (no venting). Exact:
+    u of the absorbing zone is linear in t, and P follows from the EOS."""
+    m, rho, u0 = warm_zone_initial(closure, fluid, geom, P0, spec)
+    du = L3.du_dt_homogeneous(Q_net, m)
+    return np.array([props.P_from_rho_u(fluid, rho, u0 + du * ti) for ti in t])
 
 
 # ------------------------------------------------------------ steady run ---

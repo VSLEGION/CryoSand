@@ -155,3 +155,29 @@ def test_crossover_matches_linearity_result():
     t_star = L5.t_crossover_vented(SAT.h_fg, L5.mu_active(5.0, phi, 0.025, 5.0, q_rad))
     assert _best(0.98 * t_star, "passive") < _best(0.98 * t_star, "active")
     assert _best(1.02 * t_star, "passive") > _best(1.02 * t_star, "active")
+
+
+def test_two_zone_collapses_to_homogeneous():
+    """surf_fraction = 1: the warm zone is the whole tank (property-free)."""
+    args = (0.9, 70.0, 70.8, 1.3, -3.0e3, 4.5e5)   # fill, V, rho_l, rho_v, u_l, u_v
+    V_, fill = args[1], args[0]
+    hom = L3.two_phase_mixture(fill, V_, *args[2:])
+    two = L3.two_zone_warm_state(fill, V_, 1.0, *args[2:])
+    assert all(math.isclose(a, b, rel_tol=1e-12) for a, b in zip(hom, two))
+
+
+def test_two_zone_warm_zone_shrinks_with_layer():
+    small = L3.two_zone_warm_state(0.9, 70.0, 1e-3, 70.8, 1.3, -3.0e3, 4.5e5)
+    big = L3.two_zone_warm_state(0.9, 70.0, 0.5, 70.8, 1.3, -3.0e3, 4.5e5)
+    assert small[0] < big[0]
+
+
+def test_trade_leak_matches_layer_physics():
+    """trade.Q_leak re-states L1 for speed; it must agree with L1.heat_leak."""
+    from cryosand.trade import Q_leak, TradeCase
+    A, Th, Tc, n, R_w = GEOM.surface_area, 259.0, 20.3, 7, 2e-6
+    c = TradeCase(h_fg=4.46e5, T_cold=Tc, T_hot=Th, A=A, G_strut=5e-3, t_blanket=0.025,
+                  k_eff=3e-5, rho_A_blanket=0.6, R_wall=R_w, eta_carnot=0.075,
+                  T_reject=300.0, s_pow=0.025, s_rad=5.0, q_rad=400.0)
+    ref = L1.heat_leak(_stack(n), A, Th, Tc, R_w).Q_total
+    assert math.isclose(Q_leak(c, n), ref, rel_tol=1e-12)

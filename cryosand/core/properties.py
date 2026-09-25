@@ -99,3 +99,9 @@ def T_from_rho_u(fluid: str, rho: float, u: float) -> float:
 def k_l_sat(fluid: str, P: float) -> float:
     """Saturated-liquid thermal conductivity [W/(m K)]."""
     return _props("L", "P", P, "Q", 0.0, fluid)
+
+
+def u_from_rho_P(fluid: str, rho: float, P: float) -> float:
+    """Specific internal energy [J/kg] from density [kg/m^3] and pressure [Pa].
+    Not cached: continuous state variable."""
+    return _props("U", "D", rho, "P", P, fluid)
