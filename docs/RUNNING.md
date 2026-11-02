@@ -130,7 +130,7 @@ that the flip sits at the vented t\* printed in the last block.
 | `--fill` | liquid fill fraction, 0–1 | register (0.9) |
 | `--days` | mission duration [days] | 30 |
 | `--p-vent` | vent pressure [Pa], SI on purpose | register (3e5) |
-| `--surf-fraction` | surface-bound layer size, m_surf/m_liquid, in (0, 1] | 0.01 |
+| `--surf-fraction` | surface-bound layer size, m_surf/m_liquid, in (0, 1] | per-case conduction anchor |
 | `--register` | use a different parameter file | `data/parameters.yaml` |
 | `--sweep` | vary one parameter (see Level 3) | – |
 | `--save NAME` | write the result to `runs/` | not saved |

@@ -1,7 +1,17 @@
-# Runtime + test dependencies (PROJECT.md s.3). Python 3.11+.
-numpy>=1.26
-scipy>=1.11
-matplotlib>=3.8
-CoolProp>=6.6
-PyYAML>=6.0
-pytest>=8.0
+# Runtime + test dependencies (PROJECT.md s.3, PHASE2.md WP0). Python 3.11+.
+# Pinned to the versions used to produce the current results, for reproducibility.
+# CI (.github/workflows/tests.yml) installs this on Python 3.11.
+numpy==2.3.2
+scipy==1.16.3
+matplotlib==3.10.5
+CoolProp==8.0.0
+PyYAML==6.0.3
+pandas==2.3.3
+streamlit==1.65.0
+pytest==9.0.2
+
+# plotly: required for the Phase 2 app (WP3). Not yet installed in this
+# environment, so it is left out here rather than pinned to a version that was
+# never used. Install it and pin the resulting version before WP3:
+#   pip install plotly
+# plotly==<installed version>

@@ -76,11 +76,13 @@ class Environment:
 
 @dataclass(frozen=True)
 class Cryocooler:
-    Q_lift: float         # W; 0 means fully passive
-    T_cold: float         # K
-    T_reject: float       # K
-    eta_carnot: float     # fraction of Carnot COP achieved
-    specific_mass: float  # kg per W of lift
+    Q_lift: float          # W; 0 means fully passive
+    T_cold: float          # K
+    T_reject: float        # K
+    eta_carnot: float      # fraction of Carnot COP achieved
+    s_cool_const: float    # kg per W of lift; constant-kg/W ANALYTIC LIMIT only
+    # (PHASE2.md D1). The real cooler mass is Strobridge (l4_cooling); this field
+    # is read only by mu_active / t_crossover_vented and their linearity test.
 
 
 @dataclass(frozen=True)

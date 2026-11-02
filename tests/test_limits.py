@@ -136,23 +136,33 @@ def test_zbo_balance():
     assert zbo.mass.m_lost == 0.0
 
 
+def _mu_active_const():
+    """Per-watt active cost in the constant-kg/W limit, from the fixture masses."""
+    phi = L4.specific_power(20.0, 300.0, 0.075)
+    q_rad = L4.radiator_flux(SYSP.eps_radiator, SYSP.T_radiator, ENV.T_sink)
+    return L5.mu_active(_passive().s_cool_const, phi, SYSP.specific_mass_power,
+                        SYSP.areal_density_radiator, q_rad)
+
+
 def _best(t, mode, n_max=12):
+    """Best mass over insulation. 'passive' via run_steady; 'active' in the
+    constant-kg/W analytic limit (m_ins + Q * mu_active). run_steady prices the
+    cooler with Strobridge now (D1), so the closed form t* = h_fg * mu_active is
+    checked against the constant model it is derived from, not against Strobridge."""
+    mu_act = _mu_active_const()
     best = math.inf
     for n in range(1, n_max + 1):
-        st = _stack(n)
-        r0 = run_steady(SAT, GEOM, st, ENV, _passive(), SYSP, 150.0, t, UllageClosure.VENTED)
-        if mode == "active":
-            c = Cryocooler(r0.Q_leak, 20.0, 300.0, 0.075, 5.0)
-            r0 = run_steady(SAT, GEOM, st, ENV, c, SYSP, 150.0, t, UllageClosure.VENTED)
-        best = min(best, r0.mass.m_penalty)
+        r0 = run_steady(SAT, GEOM, _stack(n), ENV, _passive(), SYSP, 150.0, t,
+                        UllageClosure.VENTED)
+        m = r0.mass.m_insulation + r0.Q_leak * mu_act if mode == "active" else r0.mass.m_penalty
+        best = min(best, m)
     return best
 
 
 def test_crossover_matches_linearity_result():
-    """Brute-force optimisation over insulation reproduces t* = h_fg * mu_active."""
-    phi = L4.specific_power(20.0, 300.0, 0.075)
-    q_rad = L4.radiator_flux(0.9, 300.0, 4.0)
-    t_star = L5.t_crossover_vented(SAT.h_fg, L5.mu_active(5.0, phi, 0.025, 5.0, q_rad))
+    """Brute-force optimisation over insulation reproduces t* = h_fg * mu_active
+    in the constant-kg/W analytic limit (PHASE2.md D1)."""
+    t_star = L5.t_crossover_vented(SAT.h_fg, _mu_active_const())
     assert _best(0.98 * t_star, "passive") < _best(0.98 * t_star, "active")
     assert _best(1.02 * t_star, "passive") > _best(1.02 * t_star, "active")
 

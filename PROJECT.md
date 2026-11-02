@@ -85,14 +85,17 @@ Run tests with `pytest -q` before every commit.
 ### L0 — Orbital environment
 
 ```
-q_abs = alpha * (G_sun + G_albedo) + eps * G_IR      [W/m^2]
+q_abs = alpha * (F_sun*G_sun + F_E*albedo*G_sun) + eps * F_E * G_IR      [W/m^2]
 ```
 
-`alpha` = solar absorptivity, `eps` = IR emissivity. Radiates to a ~4 K sink, so
-the outbound term is `eps * sigma * T_surf**4`.
+`alpha` = solar absorptivity, `eps` = IR emissivity, `F_sun` = 1/4 (sphere
+cross-section over total area), `F_E` = sphere-to-Earth view factor. Radiates to
+a ~4 K sink, so the outbound term is `eps * sigma * (T_surf**4 - T_sink**4)`.
 
-**Current scope:** one absorbed-flux number per mission preset. View factors and
-attitude dependence are a spring upgrade — do not build them now.
+**Current scope:** the sphere-to-Earth view factor `F_E` is implemented
+(`view_factor_sphere_to_earth`); one orbit-averaged absorbed-flux number per
+mission preset. Attitude dependence, eclipses and albedo phase are a spring
+upgrade — do not build them now.
 
 ### L1 — Insulation stack
 
@@ -199,7 +202,7 @@ cryocooler only.
 
 ```
 m_insulation = areal_density * A_tank * n_blankets
-m_cooler     = Q_lift * specific_mass_cooler      [kg/W lift, T-dependent]
+m_cooler     = cooler_mass_strobridge(Q_lift, T_cold, T_reject)   [kg; concave, D1]
 m_power      = W_in   * specific_mass_power       [kg/W]
 m_radiator   = A_rad  * areal_density_radiator    [kg/m^2]
 m_lost       = mdot_boil * t_mission
@@ -209,6 +212,20 @@ m_penalty = m_insulation + m_cooler + m_power + m_radiator + m_lost
 
 **The crossover is the minimum of `m_penalty` over the design space.** Passive
 wins where `m_lost` is cheap; active wins where it is not.
+
+**Cooler mass (PHASE2.md D1):** priced with the Strobridge correlation
+(`cooler_mass_strobridge`) everywhere a reported number is produced. A constant
+kg/W survives only as an analytic limit, in `l5_closure.py` and the test that
+checks `t* = h_fg * mu_active`.
+
+**Three designs (PHASE2.md D2).** A closed tank stores `E_store` before it first
+vents, so the fair trade compares three cooler sizings, not two: `PASSIVE` (no
+lift), `PARTIAL` (lift just enough to reach `P_vent` at mission end), and `ZBO`
+(lift the whole leak). Linear boil-off plus a concave cooler mass is concave, so
+the optimum is always `PASSIVE` or `PARTIAL`; `ZBO` is optimal only for a vented
+tank (`E_store = 0`), where `PARTIAL = ZBO`. Two crossover definitions are
+reported: the fair `t* = max(t*_vented, t_hold)` (missions with an end date) and
+the report-1 `t* = t*_vented + t_hold` (store-forever depots).
 
 ---
 
@@ -286,10 +303,15 @@ class UllageClosure(Enum):
     VENTED = auto()
     HOMOGENEOUS = auto()      # slow bound
     SURFACE = auto()          # fast bound
+
+class Design(Enum):           # Phase 2 (PHASE2.md D2); implemented in WP2
+    PASSIVE = auto()          # no cooler; vents after the hold time
+    PARTIAL = auto()          # "just enough" lift: reaches P_vent at mission end
+    ZBO = auto()              # lifts the whole leak; holds pressure indefinitely
 ```
 
-Every trade function takes `UllageClosure` as an explicit argument. There is no
-default.
+Every trade function takes `UllageClosure` and the active `Design` set as
+explicit arguments. There is no default (PROJECT.md s.2; PHASE2.md D5).
 
 ---
 
@@ -302,7 +324,7 @@ default.
 | `test_series_chain` | network matches analytic 1-D resistance sum to 1e-10 |
 | `test_robin_limits` | `h -> inf` gives Dirichlet at `T_inf`; `h -> 0` gives insulated |
 | `test_zbo_balance` | `Q_lift == Q_leak` ⇒ `mdot_boil == 0` to 1e-6 |
-| `test_bounds_ordered` | surface-bound `dP/dt` ≥ homogeneous `dP/dt`, at every condition |
+| `test_bounds_ordered` | surface bound stores ≤ homogeneous energy at every `m_surf` (and more as `m_surf` grows), and `dP/dt` ≥ homogeneous, at every condition |
 | `test_bounds_collapse` | `m_surf -> m_liquid` ⇒ surface bound = homogeneous bound (to 1e-10) |
 | `test_energy_balance` | transient energy closes to better than 0.5 % |
 | `test_boiloff_published` | matches a published demonstration-tank result within 10 % |
@@ -374,20 +396,21 @@ optimal omega, explicit transient under CFL, Dirichlet/Neumann/Robin boundary
 conditions, harmonic-mean variable-k stencils, Streamlit interface. Becomes
 Layer L2. PINN module in progress.
 
-**Complete (Sept 2026, first written report):** build steps 1–7. 54 tests pass
-under CoolProp: analytic limits, bound ordering at every `m_surf` for three
+**Complete (Sept 2026, first written report):** build steps 1–7. 57 tests pass
+(1 skipped, awaiting MHTB data) under CoolProp: analytic limits, bound ordering at every `m_surf` for three
 propellants and four fills, exact collapse, energy closure, liquid-full guard.
 Vented crossover map (step 9, vented closure) and closed-tank crossover at the
 LEO baseline. All report numbers regenerated from CoolProp.
 
-**Next:**
-- Closed-tank crossover sweeps across radius, environment and fill (step 9 under
-  all three closures).
-- One cooler-mass model: `model.run_steady` uses linear `specific_mass`, while
-  `trade.py` and the figures use the Strobridge correlation.
-- Source every `provisional` entry in `data/parameters.yaml` (now the single
-  source for `run_case.py` and `make_figures.py` via `cryosand/scenario.py`).
-- Step 8 (2-D L2 port), `test_boiloff_published` (MHTB), step 10 (Streamlit).
+**Next (Phase 2, Nov–Dec 2026 — plan and gates in PHASE2.md):**
+- Cooler-mass model: settled as Strobridge everywhere a reported number is
+  produced; constant kg/W kept only as an analytic limit (D1, WP1).
+- Fair closed-tank trade with three designs — PASSIVE / PARTIAL / ZBO (D2, WP2).
+- Closed-tank crossover sweeps and the crossover map across radius, environment,
+  fill and vent pressure, under all three closures (WP4, WP7).
+- Interactive Streamlit app (WP3, WP8), sourced register with t* as a band (WP5),
+  validation against MHTB / self-pressurisation data (WP6).
+- Step 8 (2-D L2 port, WP10); `test_boiloff_published` un-skipped (WP6).
 
 **Deferred to spring:** two-phase CFD dataset and trained surrogate; modified
 Lockheed MLI correlation; view factors and attitude dependence; thermodynamic

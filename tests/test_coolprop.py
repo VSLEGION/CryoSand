@@ -100,6 +100,42 @@ def test_boiloff_published():
     pytest.skip("Awaiting MHTB / GFSSP demonstration-tank data in the Stage 1 register")
 
 
+def test_run_steady_matches_trade():
+    """D1 (PHASE2.md): model.run_steady and trade.zbo_breakdown price the
+    baseline ZBO design with ONE cooler-mass model. Cooler, power, radiator and
+    total masses agree to 1e-9 relative -- the cooler term is the Strobridge
+    correlation in both paths."""
+    from cryosand import scenario as S, trade as T
+    from cryosand.core import constants as C
+    from cryosand.core.types import (Blanket, Cryocooler, Environment, InsulationStack,
+                                     SystemMassParams)
+    from cryosand.model import run_steady, saturated_state
+
+    p = S.load_params()
+    fluid = "Hydrogen"
+    e = S.environment(p, "leo")
+    c = S.trade_case(p, fluid, e["T_s"])            # baseline radius/fill
+    m_zbo, n = T.best_zbo(c)
+    bd = T.zbo_breakdown(c, n)
+
+    geom = S.tank(p)
+    sat = saturated_state(fluid, p.P_storage)
+    stack = InsulationStack(
+        tuple(Blanket(p.unit_thickness, p.k_eff, p.unit_areal_density) for _ in range(n)),
+        p.G_strut)
+    env = Environment(q_absorbed=e["q_abs"], T_sink=C.T_DEEP_SPACE, eps_surface=p.eps_out)
+    # 5th field (s_cool_const) is the constant-kg/W analytic limit; run_steady
+    # no longer uses it for the cooler mass, so its value is irrelevant here.
+    cooler = Cryocooler(T.Q_leak(c, n), c.T_cold, c.T_reject, c.eta_carnot, 5.0)
+    sysp = SystemMassParams(p.s_pow, p.s_rad, p.eps_rad, p.T_rad)
+    r = run_steady(sat, geom, stack, env, cooler, sysp, p.k_wall, 1e7, UllageClosure.VENTED)
+
+    assert math.isclose(r.mass.m_cooler, bd["m_cooler"], rel_tol=1e-9)
+    assert math.isclose(r.mass.m_power, bd["m_power"], rel_tol=1e-9)
+    assert math.isclose(r.mass.m_radiator, bd["m_radiator"], rel_tol=1e-9)
+    assert math.isclose(r.mass.m_penalty, m_zbo, rel_tol=1e-9)
+
+
 def test_run_case_reproduces_report_baseline():
     """scripts/run_case.py agrees with the report (LH2, LEO, r = 2 m)."""
     import importlib.util

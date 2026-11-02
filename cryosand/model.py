@@ -5,9 +5,11 @@ point that depends on ullage physics takes an explicit UllageClosure.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.optimize import brentq
 
 from cryosand.core import properties as props
 from cryosand.core.types import (Cryocooler, Environment, InsulationStack, SaturatedState,
@@ -79,6 +81,38 @@ def stored_energy(closure: UllageClosure, fluid: str, geom: TankGeometry, P0: fl
     return L3.stored_energy_homogeneous(m, u0, u_max)
 
 
+def conduction_anchor_fraction(fluid: str, geom: TankGeometry, P0: float, P_max: float,
+                               Q_net: float) -> float:
+    """Surface-bound layer fraction f = m_surf/m_liquid set by the conduction
+    anchor (PHASE2.md D3): grow the stagnant, stably stratified conduction layer
+    (L3.m_surf_conduction, Carslaw & Jaeger) until it has absorbed its own stored
+    energy, i.e. solve E_surface(f) = Q_net * t for the time t.
+
+    One physically motivated point on the m_surf sweep, computed per case from
+    this case's heat leak Q_net [W], interface area and fluid properties -- never
+    a hard-coded fraction. Mirrors the solve in scripts/make_figures.py.
+
+    Raises LiquidFullError (via the homogeneous bracket) or ValueError (brentq)
+    when the anchor is undefined, e.g. a tank that goes liquid-full before P_max.
+    """
+    V = geom.volume
+    rho_l = props.rho_l_sat(fluid, P0)
+    m_liquid = rho_l * geom.fill_fraction * V
+    cp = props.cp_l_sat(fluid, props.T_sat(fluid, P0))
+    k = props.k_l_sat(fluid, P0)
+    alpha = k / (rho_l * cp)                     # liquid thermal diffusivity [m^2/s]
+    A_int = math.pi * geom.radius**2             # flat interface area [m^2]
+    E_hom = stored_energy(UllageClosure.HOMOGENEOUS, fluid, geom, P0, ClosedTankSpec(P_max))
+
+    def residual(t: float) -> float:
+        f = min(L3.m_surf_conduction(rho_l, alpha, A_int, t) / m_liquid, 1.0)
+        E_surf = stored_energy(UllageClosure.SURFACE, fluid, geom, P0, ClosedTankSpec(P_max, f))
+        return E_surf - Q_net * t
+
+    t_cond = brentq(residual, 1.0, 10.0 * E_hom / Q_net, xtol=1.0)
+    return min(L3.m_surf_conduction(rho_l, alpha, A_int, t_cond) / m_liquid, 1.0)
+
+
 def pressure_history(closure: UllageClosure, fluid: str, geom: TankGeometry, P0: float,
                      Q_net: float, t: np.ndarray, spec: ClosedTankSpec) -> np.ndarray:
     """Closed-tank pressure P(t) [Pa] under either bound (no venting). Exact:
@@ -126,7 +160,8 @@ def run_steady(sat: SaturatedState, geom: TankGeometry, stack: InsulationStack,
         E_store = 0.0
     t_hold = L3.hold_time(E_store, Q_net)
     t_venting = max(t_mission - t_hold, 0.0)
-    mass = L5.mass_breakdown(L1.insulation_mass(stack, A), cooler.Q_lift, cooler.specific_mass,
+    m_cooler = L4.cooler_mass_strobridge(cooler.Q_lift, cooler.T_cold, cooler.T_reject)
+    mass = L5.mass_breakdown(L1.insulation_mass(stack, A), m_cooler,
                              W, sysp.specific_mass_power, A_rad, sysp.areal_density_radiator,
                              mdot, t_venting)
     return SteadyResult(T_s, leak.Q_total, leak.Q_strut, R_w, leak.R_blanket, Q_net, W, Q_rej,

@@ -7,7 +7,15 @@ physics specification and conventions.
 recording results, and regenerating the report.
 
 ## Setup (laptop)
+
+Python 3.11+. A virtual environment keeps this project's pinned versions isolated
+from the rest of your machine (full walkthrough in [docs/RUNNING.md](docs/RUNNING.md) s.1):
+
+    python -m venv .venv                 # once
+    source .venv/bin/activate            # macOS / Linux: run in each new shell
+    .venv\Scripts\Activate.ps1           # Windows PowerShell: run in each new shell
     pip install -r requirements.txt
+
     python -m pytest                 # all tests; CoolProp is required, CI enforces it
     python scripts/run_case.py       # one case from data/parameters.yaml (see --help)
     python scripts/make_figures.py   # regenerates report/figures, results.json, results_macros.tex

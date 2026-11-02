@@ -37,7 +37,8 @@ from cryosand.core import constants as C  # noqa: E402
 from cryosand.core import properties as props  # noqa: E402
 from cryosand.core.types import UllageClosure  # noqa: E402
 from cryosand.layers import l4_cooling as L4  # noqa: E402
-from cryosand.model import ClosedTankSpec, LiquidFullError, stored_energy  # noqa: E402
+from cryosand.model import (ClosedTankSpec, LiquidFullError, stored_energy,  # noqa: E402
+                            conduction_anchor_fraction)
 from cryosand import trade as T  # noqa: E402
 
 DAY = C.SECONDS_PER_DAY
@@ -78,10 +79,22 @@ def run(p: S.Params, fluid: str, env: str, radius: float, fill: float, days: flo
     out["winner_vented"] = "passive" if m_pas < m_zbo else "ZBO"
     out["t_star_vented_days"] = T.t_crossover(c, UllageClosure.VENTED, 0.0) / DAY
 
+    # surface-bound layer size: an explicit --surf-fraction, or the per-case
+    # conduction anchor (PHASE2.md D3) from this duration's passive leak.
+    anchor_failed = False
+    if surf_fraction is None:
+        try:
+            surf_fraction = conduction_anchor_fraction(fluid, g, p.P_storage, p_vent, Q_pas)
+        except (LiquidFullError, ValueError):
+            surf_fraction, anchor_failed = math.nan, True
+        out["surf_fraction"] = surf_fraction
+
     # closed tank, both bounds. Hold times use the passive-optimum leak.
     for tag, closure, f in (("hom", UllageClosure.HOMOGENEOUS, 1.0),
                             ("surf", UllageClosure.SURFACE, surf_fraction)):
         try:
+            if closure is UllageClosure.SURFACE and anchor_failed:
+                raise LiquidFullError("conduction anchor undefined: warm zone liquid-full")
             E = stored_energy(closure, fluid, g, p.P_storage, ClosedTankSpec(p_vent, f))
         except LiquidFullError:
             out.update({f"E_store_{tag}": math.nan, f"t_hold_{tag}_days": math.nan,
@@ -179,8 +192,9 @@ def main(argv=None) -> None:
     ap.add_argument("--fill", type=float, help="fill fraction 0-1 (default: register)")
     ap.add_argument("--days", type=float, default=30.0, help="mission duration [days] (default 30)")
     ap.add_argument("--p-vent", type=float, help="vent pressure [Pa] (default: register)")
-    ap.add_argument("--surf-fraction", type=float, default=1e-2,
-                    help="surface bound m_surf/m_liquid in (0, 1] (default 0.01)")
+    ap.add_argument("--surf-fraction", type=float, default=None,
+                    help="surface bound m_surf/m_liquid in (0, 1] "
+                         "(default: per-case conduction anchor, PHASE2.md D3)")
     ap.add_argument("--sweep", help=f"PARAM=start:stop:n, PARAM in {SWEEPABLE}; "
                                     "log-spaced if prefixed log:, e.g. surf_fraction=log:1e-4:1:9")
     ap.add_argument("--save", metavar="NAME", help="save to runs/<timestamp>_NAME.json/.csv")
